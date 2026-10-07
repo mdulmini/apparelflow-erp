@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { api, getToken, setToken, describeError } from './api.js';
 import Login from './pages/Login.jsx';
 import Supervisor from './pages/Supervisor.jsx';
-// Day 3: import Verifier from './pages/Verifier.jsx';
+import Verifier from './pages/Verifier.jsx';
 // Day 4: import Sewing from './pages/Sewing.jsx';
 
 const ROLE_LABEL = { cutting_supervisor: 'Cutting Supervisor', cutting_verifier: 'Cutting Verifier', sewing_supervisor: 'Sewing Supervisor' };
@@ -57,7 +57,7 @@ export default function App() {
       {switchErr && <div className="banner banner-error">{switchErr}</div>}
       <main key={user.role}>
         {user.role === 'cutting_supervisor' && <Supervisor />}
-        {user.role === 'cutting_verifier' && <Soon day="Day 3" />}
+        {user.role === 'cutting_verifier' && <Verifier />}
         {user.role === 'sewing_supervisor' && <Soon day="Day 4" />}
       </main>
     </div>
