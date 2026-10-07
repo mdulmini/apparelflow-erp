@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { HttpError, wrap } from '../errors.js';
-import { STATUS, isPositiveInt, isYards, isRollId } from '../domain.js';
+import { STATUS, itemStatus, wastagePct, expectedFabric, isPositiveInt, isNonNegInt, isYards, isRollId } from '../domain.js';
 import { hydrate, assertTransition, buildItems } from '../orders.js';
 
 const num = (v) => Number(v);
@@ -91,7 +91,104 @@ export function ordersRouter(db, { authenticate, requireRole }) {
     res.json((await hydrate(db, [await db('cutting_orders').where({ id }).first()]))[0]);
   }));
 
-  // Day 3 adds here: PUT /orders/:id/counts, POST /orders/:id/approve, POST /orders/:id/reject
+    // ---- Verifier: record physical counts (server computes the traffic light) ----
+    r.put('/orders/:id/counts', requireRole('cutting_verifier'), wrap(async (req, res) => {
+      const id = parseId(req);
+      const counts = req.body?.counts;
+      if (!Array.isArray(counts) || counts.length === 0) throw new HttpError(400, 'counts must be a non-empty array');
+      const seen = new Set();
+      const errors = {};
+      for (const c of counts) {
+        if (!c || !isPositiveInt(c.component_id)) { errors.component_id = 'Invalid component_id'; continue; }
+        if (seen.has(c.component_id)) errors[`c${c.component_id}`] = 'Duplicate component';
+        seen.add(c.component_id);
+        if (!isNonNegInt(c.actual_qty)) errors[`c${c.component_id}`] = 'Count must be a whole number >= 0';
+      }
+      if (Object.keys(errors).length) throw new HttpError(400, 'Validation failed', errors);
+  
+      await db.transaction(async (trx) => {
+        const order = await trx('cutting_orders').where({ id }).first();
+        if (!order || order.status === STATUS.CUTTING_IN_PROGRESS) throw new HttpError(404, 'Order not found');
+        if (order.status !== STATUS.PENDING_VERIFICATION) throw new HttpError(409, 'Counts can only be recorded while the order is PENDING_VERIFICATION');
+        const items = await trx('verification_items').where({ order_id: id });
+        for (const c of counts) {
+          const item = items.find((i) => i.component_id === c.component_id);
+          if (!item) throw new HttpError(400, `Component ${c.component_id} does not belong to this order`);
+          await trx('verification_items').where({ id: item.id }).update({
+            actual_qty: c.actual_qty,
+            status: itemStatus(item.expected_qty, c.actual_qty), // computed here, client status ignored
+          });
+        }
+      });
+      res.json((await hydrate(db, [await db('cutting_orders').where({ id }).first()]))[0]);
+    }));
+  
+    // ---- Verifier: APPROVE (hard stop) ----
+    r.post('/orders/:id/approve', requireRole('cutting_verifier'), wrap(async (req, res) => {
+      const id = parseId(req);
+      const note = req.body?.note;
+      if (note !== undefined && (typeof note !== 'string' || note.length > 500)) throw new HttpError(400, 'note must be a string up to 500 characters');
+  
+      await db.transaction(async (trx) => {
+        const order = await trx('cutting_orders').where({ id }).first();
+        if (!order || order.status === STATUS.CUTTING_IN_PROGRESS) throw new HttpError(404, 'Order not found');
+        assertTransition(order.status, STATUS.VERIFIED);
+  
+        const items = await trx('verification_items as vi').join('recipe_components as rc', 'rc.id', 'vi.component_id')
+          .where('vi.order_id', id).select('vi.*', 'rc.component_name');
+        const uncounted = items.filter((i) => i.actual_qty === null || i.actual_qty === undefined);
+        if (items.length === 0 || uncounted.length) {
+          throw new HttpError(422, 'Approval blocked: every component must be counted', { uncounted: uncounted.map((i) => i.component_name) });
+        }
+        // Re-derive status from raw numbers; never trust the stored flag.
+        const red = items.filter((i) => itemStatus(i.expected_qty, i.actual_qty) === 'RED');
+        if (red.length) {
+          throw new HttpError(422, 'Approval blocked: shortage detected (RED). Reject the batch for re-cutting.', {
+            red: red.map((i) => ({ component: i.component_name, expected: i.expected_qty, actual: i.actual_qty })),
+          });
+        }
+        const recipe = await trx('recipes').where({ id: order.recipe_id }).first();
+        const wp = wastagePct(num(order.actual_fabric_yds), expectedFabric(num(recipe.std_fabric_yards), order.target_qty));
+        const updated = await trx('cutting_orders').where({ id, status: STATUS.PENDING_VERIFICATION }).update({ status: STATUS.VERIFIED, updated_at: new Date() });
+        if (updated !== 1) throw new HttpError(409, 'Order state changed, please refresh');
+        await trx('verification_logs').insert({
+          order_id: id,
+          verifier_id: req.user.id, // from the login token, never from the request body
+          decision: 'APPROVED',
+          rejection_note: null,
+          audit_note: note?.trim() || null,
+          wastage_pct: wp,
+          variance_snapshot: JSON.stringify(items.map((i) => ({ component_id: i.component_id, component_name: i.component_name, expected: i.expected_qty, actual: i.actual_qty, status: itemStatus(i.expected_qty, i.actual_qty), variance: i.actual_qty - i.expected_qty }))),
+          timestamp: new Date(), // server clock
+        });
+      });
+      res.json((await hydrate(db, [await db('cutting_orders').where({ id }).first()]))[0]);
+    }));
+  
+    // ---- Verifier: REJECT (mandatory reason) ----
+    r.post('/orders/:id/reject', requireRole('cutting_verifier'), wrap(async (req, res) => {
+      const id = parseId(req);
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+      if (reason.length < 5 || reason.length > 500) throw new HttpError(400, 'Validation failed', { reason: 'A rejection reason of 5-500 characters is mandatory' });
+  
+      await db.transaction(async (trx) => {
+        const order = await trx('cutting_orders').where({ id }).first();
+        if (!order || order.status === STATUS.CUTTING_IN_PROGRESS) throw new HttpError(404, 'Order not found');
+        assertTransition(order.status, STATUS.REJECTED);
+        const items = await trx('verification_items as vi').join('recipe_components as rc', 'rc.id', 'vi.component_id')
+          .where('vi.order_id', id).select('vi.*', 'rc.component_name');
+        const recipe = await trx('recipes').where({ id: order.recipe_id }).first();
+        const wp = wastagePct(num(order.actual_fabric_yds), expectedFabric(num(recipe.std_fabric_yards), order.target_qty));
+        const updated = await trx('cutting_orders').where({ id, status: STATUS.PENDING_VERIFICATION }).update({ status: STATUS.REJECTED, updated_at: new Date() });
+        if (updated !== 1) throw new HttpError(409, 'Order state changed, please refresh');
+        await trx('verification_logs').insert({
+          order_id: id, verifier_id: req.user.id, decision: 'REJECTED', rejection_note: reason, audit_note: null, wastage_pct: wp,
+          variance_snapshot: JSON.stringify(items.map((i) => ({ component_id: i.component_id, component_name: i.component_name, expected: i.expected_qty, actual: i.actual_qty, status: itemStatus(i.expected_qty, i.actual_qty), variance: i.actual_qty == null ? null : i.actual_qty - i.expected_qty }))),
+          timestamp: new Date(),
+        });
+      });
+      res.json((await hydrate(db, [await db('cutting_orders').where({ id }).first()]))[0]);
+    }));
 
   return r;
 } 
