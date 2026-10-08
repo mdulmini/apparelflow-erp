@@ -3,7 +3,7 @@ import { api, getToken, setToken, describeError } from './api.js';
 import Login from './pages/Login.jsx';
 import Supervisor from './pages/Supervisor.jsx';
 import Verifier from './pages/Verifier.jsx';
-// Day 4: import Sewing from './pages/Sewing.jsx';
+import Sewing from './pages/Sewing.jsx';
 
 const ROLE_LABEL = { cutting_supervisor: 'Cutting Supervisor', cutting_verifier: 'Cutting Verifier', sewing_supervisor: 'Sewing Supervisor' };
 const Soon = ({ day }) => <div className="card empty">This screen is built on {day}.</div>;
@@ -58,7 +58,7 @@ export default function App() {
       <main key={user.role}>
         {user.role === 'cutting_supervisor' && <Supervisor />}
         {user.role === 'cutting_verifier' && <Verifier />}
-        {user.role === 'sewing_supervisor' && <Soon day="Day 4" />}
+        {user.role === 'sewing_supervisor' && <Sewing />}
       </main>
     </div>
   );

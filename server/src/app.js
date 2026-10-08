@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { makeAuth } from './auth.js';
 import { ordersRouter } from './routes/orders.js';
+import { sewingRouter } from './routes/sewing.js';
 import { errorHandler } from './errors.js';
 import { DEMO_USERS } from './seed.js';
 
@@ -32,7 +33,7 @@ export function createApp(db, { jwtSecret, serveClient = false } = {}) {
     res.json(DEMO_USERS.map(({ email, password, role, full_name }) => ({ email, password, role, full_name }))));
 
   app.use('/api', ordersRouter(db, auth));
-  // Day 4 adds here: app.use('/api/sewing', sewingRouter(db, auth));
+  app.use('/api/sewing', sewingRouter(db, auth));
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
   if (serveClient) {

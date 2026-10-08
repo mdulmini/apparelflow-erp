@@ -1,4 +1,4 @@
-/* High-contrast, light theme. color-scheme: light stops OS dark mode from turning inputs white-on-white. */
+
 :root {
     color-scheme: light;
     --bg: #f3f5f9; --card: #ffffff; --ink: #111827; --muted: #4b5563; --line: #9ca3af;
@@ -12,7 +12,7 @@
   .center { display: grid; place-items: center; min-height: 100vh; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   
-  /* ---- form controls: always dark text on white, with visible borders and focus ---- */
+  
   input, select, textarea {
     width: 100%; font: inherit; padding: 10px 12px; color: #111827; background-color: #ffffff;
     border: 2px solid var(--line); border-radius: 8px; -webkit-text-fill-color: #111827; opacity: 1;
