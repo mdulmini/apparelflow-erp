@@ -1,12 +1,8 @@
 import knex from 'knex';
+import 'pg'; 
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-/**
- * Production: DATABASE_URL (PostgreSQL - Neon / Supabase / Render Postgres).
- * Local dev: SQLite file.  Tests: in-memory SQLite ({ memory: true }).
- * Same Knex query code runs on both.
- */
 export function createDb({ memory = false } = {}) {
   if (!memory && process.env.DATABASE_URL) {
     return knex({
