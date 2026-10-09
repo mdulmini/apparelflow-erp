@@ -2,7 +2,7 @@
 
 A full-stack implementation of the Webtezza engineering challenge: a **server-enforced hard stop** that stops any cutting batch with a component shortage from reaching the Sewing Queue.
 
-- **Live URL:** `https://YOUR-APP.onrender.com` (replace after deploying)
+- **Live URL:** `https://apparelflow-erp-client.vercel.app/` 
 - **Stack:** React (Vite) · Node.js / Express · Knex · PostgreSQL (production, Neon) / SQLite (local and tests) · JWT auth · Vitest + Supertest
 
 ## Demo credentials
